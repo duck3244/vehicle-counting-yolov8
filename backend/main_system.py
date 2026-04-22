@@ -9,8 +9,11 @@ import argparse
 import yaml
 import logging
 import time
+from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+ProgressCallback = Callable[[float, int, int], None]  # (progress 0~1, current, total)
 
 # 모듈 임포트
 from detector import VehicleDetector
@@ -26,11 +29,14 @@ class VehicleCountingSystem:
     def __init__(self, config_path: str = "config.yaml"):
         """
         시스템 초기화
-        
+
         Args:
             config_path (str): 설정 파일 경로
         """
-        # 설정 로드
+        # 설정 로드 (경로를 함께 보관하여 이후 백업 등에서 재사용)
+        self.config_path: Optional[Path] = (
+            Path(config_path).resolve() if Path(config_path).is_file() else None
+        )
         self.config = self._load_config(config_path)
         
         # 로깅 설정
@@ -47,10 +53,13 @@ class VehicleCountingSystem:
         self.is_running = False
         self.frame_count = 0
         self.start_time = None
+
+        # 진행률 콜백 (API 서버 등 외부에서 주입 가능)
+        self.progress_callback: Optional[ProgressCallback] = None
         
-        # 성능 측정
-        self.fps_counter = []
-        self.processing_times = []
+        # 성능 측정 (무한 증가 방지를 위해 고정 길이 deque 사용)
+        self.fps_counter: deque = deque(maxlen=300)
+        self.processing_times: deque = deque(maxlen=300)
         
         logging.info("VehicleCountingSystem 초기화 완료")
     
@@ -108,17 +117,29 @@ class VehicleCountingSystem:
         }
     
     def _setup_logging(self):
-        """로깅 설정"""
-        log_level = self.config.get('debug', {}).get('log_level', 'INFO')
+        """로깅 설정
+
+        같은 프로세스에서 여러 번 호출되어도 핸들러가 중복으로 추가되지 않도록
+        ``force=True`` 로 루트 로거의 기존 핸들러를 제거한 뒤 재설정한다.
+        API 서버 등 외부에서 이미 로깅을 구성한 경우 ``debug.skip_logging_setup``
+        을 true 로 지정하면 이 함수는 아무 작업도 하지 않는다.
+        """
+        debug_cfg = self.config.get('debug', {})
+        if debug_cfg.get('skip_logging_setup', False):
+            return
+
+        log_level = debug_cfg.get('log_level', 'INFO')
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        
+        log_file = debug_cfg.get('log_file', 'vehicle_counting.log')
+
         logging.basicConfig(
-            level=getattr(logging, log_level),
+            level=getattr(logging, log_level, logging.INFO),
             format=log_format,
             handlers=[
                 logging.StreamHandler(),
-                logging.FileHandler('vehicle_counting.log')
-            ]
+                logging.FileHandler(log_file),
+            ],
+            force=True,
         )
     
     def initialize_modules(self, frame_width: int = 1920, frame_height: int = 1080):
@@ -136,7 +157,9 @@ class VehicleCountingSystem:
             tracking_config = self.config.get('tracking', {})
             self.tracker = VehicleTracker(
                 max_history_length=tracking_config.get('max_history_length', 50),
-                max_disappeared=tracking_config.get('max_disappeared', 30)
+                max_disappeared=tracking_config.get('max_disappeared', 30),
+                cleanup_interval_frames=tracking_config.get('cleanup_interval_frames', 300),
+                cleanup_max_age_seconds=tracking_config.get('cleanup_max_age_seconds', 300),
             )
             
             # 차선 관리자
@@ -247,9 +270,10 @@ class VehicleCountingSystem:
             processing_time = time.time() - frame_start_time
             self.processing_times.append(processing_time)
             
-            # FPS 계산
-            if len(self.processing_times) > 30:
-                avg_time = sum(self.processing_times[-30:]) / 30
+            # FPS 계산 (최근 30 프레임 평균 — deque 는 슬라이싱 미지원이라 list 변환)
+            if len(self.processing_times) >= 30:
+                recent = list(self.processing_times)[-30:]
+                avg_time = sum(recent) / len(recent)
                 fps = 1.0 / avg_time if avg_time > 0 else 0
                 self.fps_counter.append(fps)
             
@@ -261,53 +285,104 @@ class VehicleCountingSystem:
             logging.error(f"프레임 처리 오류: {e}")
             return frame
     
+    @staticmethod
+    def _open_video_writer(output_path: str, fps: int,
+                           width: int, height: int) -> Optional[cv2.VideoWriter]:
+        """브라우저 호환을 위해 H.264(avc1) 우선 시도, 실패 시 mp4v 로 fallback.
+
+        OpenCV 빌드에 H.264 코덱이 포함돼 있지 않으면 avc1 writer 는
+        ``isOpened()`` 가 False 로 반환된다. 그 경우 조용히 mp4v 로 떨어뜨린다
+        (경고는 남긴다).
+        """
+        for codec in ('avc1', 'mp4v'):
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            if writer.isOpened():
+                if codec != 'avc1':
+                    logging.warning(
+                        "H.264(avc1) 인코더가 없어 mp4v 로 저장합니다 — "
+                        "브라우저에서 바로 재생되지 않을 수 있으니 ffmpeg 후처리를 권장합니다."
+                    )
+                logging.info(f"결과 영상 코덱: {codec}")
+                return writer
+            writer.release()
+        return None
+
     def process_video(self, input_path: str, output_path: str = None) -> bool:
         """비디오 파일 처리"""
+        if not Path(input_path).is_file():
+            logging.error(f"입력 파일이 존재하지 않습니다: {input_path}")
+            return False
+
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             logging.error(f"비디오 파일을 열 수 없습니다: {input_path}")
             return False
-        
-        # 비디오 속성
+
+        # 비디오 속성 + 검증
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
+        if width <= 0 or height <= 0 or fps <= 0:
+            logging.error(
+                f"비디오 메타데이터가 유효하지 않습니다: {width}x{height}, {fps}fps"
+            )
+            cap.release()
+            return False
+        if total_frames <= 0:
+            logging.warning("총 프레임 수를 확인할 수 없습니다. 진행률은 표시되지 않습니다.")
+
         logging.info(f"비디오 정보: {width}x{height}, {fps}fps, {total_frames}프레임")
-        
+
         # 모듈 초기화
         self.initialize_modules(width, height)
-        
-        # 출력 비디오 설정
+
+        # 프레임 스킵 (video.frame_skip)
+        video_cfg = self.config.get('video', {})
+        frame_skip = max(1, int(video_cfg.get('frame_skip', 1)))
+
+        # 출력 비디오 설정 — 브라우저 호환을 위해 H.264(avc1) 우선 시도, 실패 시 mp4v fallback
         out = None
         if output_path:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
+            effective_fps = max(1, fps // frame_skip)
+            out = self._open_video_writer(output_path, effective_fps, width, height)
+            if out is None or not out.isOpened():
+                logging.error(f"출력 비디오 파일을 열 수 없습니다: {output_path}")
+                cap.release()
+                return False
+
         # 처리 시작
         self.is_running = True
         self.start_time = time.time()
-        
+
         logging.info("비디오 처리 시작...")
-        
+
+        read_idx = 0
         try:
             while self.is_running:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                
+
+                # 프레임 스킵: read_idx 가 frame_skip 배수일 때만 처리
+                if frame_skip > 1 and (read_idx % frame_skip) != 0:
+                    read_idx += 1
+                    continue
+                read_idx += 1
+
                 # 프레임 처리
                 result_frame = self.process_frame(frame)
-                
+
                 # 출력 비디오에 쓰기
                 if out:
                     out.write(result_frame)
-                
+
                 # 실시간 표시
-                if self.config.get('video', {}).get('display_realtime', True):
+                if video_cfg.get('display_realtime', True):
                     cv2.imshow('Vehicle Counting System', result_frame)
-                    
+
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
                         break
@@ -316,13 +391,22 @@ class VehicleCountingSystem:
                         screenshot_path = f"screenshot_{int(time.time())}.jpg"
                         cv2.imwrite(screenshot_path, result_frame)
                         logging.info(f"스크린샷 저장: {screenshot_path}")
-                
-                # 진행률 표시
-                if self.frame_count % 100 == 0:
-                    progress = (self.frame_count / total_frames) * 100
-                    elapsed_time = time.time() - self.start_time
-                    logging.info(f"진행률: {progress:.1f}% ({self.frame_count}/{total_frames}), "
-                               f"경과시간: {elapsed_time:.1f}초")
+
+                # 진행률 표시 및 콜백
+                if self.frame_count % 20 == 0 and total_frames > 0:
+                    ratio = min(1.0, self.frame_count / total_frames)
+                    if self.frame_count % 100 == 0:
+                        elapsed_time = time.time() - self.start_time
+                        logging.info(
+                            f"진행률: {ratio*100:.1f}% "
+                            f"({self.frame_count}/{total_frames}), "
+                            f"경과시간: {elapsed_time:.1f}초"
+                        )
+                    if self.progress_callback is not None:
+                        try:
+                            self.progress_callback(ratio, self.frame_count, total_frames)
+                        except Exception as cb_err:
+                            logging.debug(f"progress_callback 예외: {cb_err}")
         
         except KeyboardInterrupt:
             logging.info("사용자에 의해 처리 중단됨")
@@ -446,38 +530,45 @@ class VehicleCountingSystem:
         if not output_config.get('save_results', True):
             return
         
-        # JSON 결과 저장
+        # JSON 결과 저장 — counter.export_results 는 path traversal 방지를 위해
+        # filename 의 디렉터리 성분을 무시한다. 출력 디렉터리는 output_dir 로 분리 전달.
         results_file = output_config.get('results_file', 'counting_results')
-        json_file = f"{results_file}.json"
-        self.counter.export_results(json_file)
+        json_path = Path(f"{results_file}.json")
+        json_out_dir = json_path.parent
+        json_out_dir.mkdir(parents=True, exist_ok=True)
+        self.counter.export_results(
+            filename=json_path.name, output_dir=str(json_out_dir)
+        )
         
         # 차트 생성 및 저장
         try:
+            import matplotlib.pyplot as plt
             if self.visualizer:
                 # 카운팅 차트
                 chart_fig = self.visualizer.create_counting_chart(self.counter)
                 if chart_fig:
                     chart_fig.savefig(f"{results_file}_chart.png", dpi=300, bbox_inches='tight')
-                    chart_fig.close()
-                
+                    plt.close(chart_fig)
+
                 # 시간별 차트
                 hourly_fig = self.visualizer.create_hourly_chart(self.counter)
                 if hourly_fig:
                     hourly_fig.savefig(f"{results_file}_hourly.png", dpi=300, bbox_inches='tight')
-                    hourly_fig.close()
-                
+                    plt.close(hourly_fig)
+
                 logging.info("차트 생성 및 저장 완료")
-        
+
         except Exception as e:
             logging.warning(f"차트 생성 실패: {e}")
-        
-        # 설정 파일 백업
-        import shutil
-        try:
-            shutil.copy2("config.yaml", f"{results_file}_config_backup.yaml")
-        except:
-            pass
-        
+
+        # 설정 파일 백업 — 실제로 로드된 경로를 사용 (cwd 의존 제거)
+        if self.config_path is not None and self.config_path.is_file():
+            import shutil
+            try:
+                shutil.copy2(self.config_path, f"{results_file}_config_backup.yaml")
+            except (PermissionError, OSError) as e:
+                logging.debug(f"설정 파일 백업 생략: {e}")
+
         logging.info("결과 저장 완료")
     
     def get_system_status(self) -> Dict:
@@ -548,7 +639,23 @@ def main():
     parser.add_argument('--save-results', '-s', action='store_true', help='결과 저장')
     
     args = parser.parse_args()
-    
+
+    # 인자 검증
+    if args.conf is not None and not (0.0 <= args.conf <= 1.0):
+        parser.error("--conf 는 0.0 ~ 1.0 범위여야 합니다.")
+    if args.lanes is not None and not (1 <= args.lanes <= 20):
+        parser.error("--lanes 는 1 ~ 20 범위여야 합니다.")
+    if args.camera_index < 0:
+        parser.error("--camera-index 는 0 이상이어야 합니다.")
+    if args.input and not Path(args.input).is_file():
+        parser.error(f"입력 파일을 찾을 수 없습니다: {args.input}")
+    if args.model and not Path(args.model).is_file():
+        # yolov8*.pt 같은 short-name 은 ultralytics 가 자동 다운로드하므로 경고만
+        logging.warning(
+            f"지정된 모델 파일이 로컬에 없습니다: {args.model} "
+            "(ultralytics 자동 다운로드 시도 예정)"
+        )
+
     # 시스템 초기화
     system = VehicleCountingSystem(args.config)
     

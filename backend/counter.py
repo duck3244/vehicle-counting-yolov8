@@ -6,6 +6,7 @@
 import cv2
 import numpy as np
 from collections import defaultdict, Counter
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
 import time
 import json
@@ -309,8 +310,13 @@ class VehicleCounter:
         
         return result_frame
     
-    def export_results(self, filename: str = "counting_results.json"):
-        """결과를 JSON 파일로 내보내기"""
+    def export_results(self, filename: str = "counting_results.json",
+                       output_dir: Optional[str] = None):
+        """결과를 JSON 파일로 내보내기
+
+        ``filename`` 의 디렉터리 성분은 무시하고 파일명만 사용한다
+        (path traversal 방지). 저장 위치를 바꾸려면 ``output_dir`` 로 지정한다.
+        """
         results = {
             'session_info': {
                 'start_time': self.counting_session_start,
@@ -329,48 +335,60 @@ class VehicleCounter:
             },
             'recent_events': self.counting_events[-100:]  # 최근 100개 이벤트
         }
-        
-        with open(filename, 'w') as f:
-            json.dump(results, f, indent=2)
-        
-        logging.info(f"카운팅 결과 내보내기 완료: {filename}")
+
+        # path traversal 방지: 디렉터리 구성요소 분리
+        base_dir = Path(output_dir).resolve() if output_dir else Path.cwd()
+        base_dir.mkdir(parents=True, exist_ok=True)
+        safe_path = base_dir / Path(filename).name
+
+        try:
+            with open(safe_path, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            logging.info(f"카운팅 결과 내보내기 완료: {safe_path}")
+        except (OSError, TypeError) as e:
+            logging.error(f"결과 파일 저장 실패 ({safe_path}): {e}")
     
     def import_results(self, filename: str) -> bool:
         """결과를 JSON 파일에서 가져오기"""
         try:
-            with open(filename, 'r') as f:
+            with open(filename, 'r', encoding='utf-8') as f:
                 results = json.load(f)
-            
-            # 카운트 데이터 복원
-            if 'total_counts' in results:
-                self.total_counts = defaultdict(int, results['total_counts'])
-            
-            if 'lane_counts' in results:
-                self.lane_counts = defaultdict(lambda: defaultdict(int))
-                for lane_str, counts in results['lane_counts'].items():
-                    lane_idx = int(lane_str)
-                    self.lane_counts[lane_idx] = defaultdict(int, counts)
-            
-            if 'direction_counts' in results:
-                self.direction_counts = defaultdict(lambda: defaultdict(int))
-                for direction, counts in results['direction_counts'].items():
-                    self.direction_counts[direction] = defaultdict(int, counts)
-            
-            if 'hourly_counts' in results:
-                self.hourly_counts = defaultdict(lambda: defaultdict(int))
-                for hour, counts in results['hourly_counts'].items():
-                    self.hourly_counts[hour] = defaultdict(int, counts)
-            
-            # 이벤트 로그 복원
-            if 'recent_events' in results:
-                self.counting_events = results['recent_events']
-            
-            logging.info(f"카운팅 결과 가져오기 완료: {filename}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"카운팅 결과 가져오기 실패: {e}")
+        except FileNotFoundError:
+            logging.error(f"파일을 찾을 수 없습니다: {filename}")
             return False
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON 파싱 실패 ({filename}): {e}")
+            return False
+        except OSError as e:
+            logging.error(f"파일 읽기 실패 ({filename}): {e}")
+            return False
+
+        # 카운트 데이터 복원
+        if 'total_counts' in results:
+            self.total_counts = defaultdict(int, results['total_counts'])
+
+        if 'lane_counts' in results:
+            self.lane_counts = defaultdict(lambda: defaultdict(int))
+            for lane_str, counts in results['lane_counts'].items():
+                lane_idx = int(lane_str)
+                self.lane_counts[lane_idx] = defaultdict(int, counts)
+
+        if 'direction_counts' in results:
+            self.direction_counts = defaultdict(lambda: defaultdict(int))
+            for direction, counts in results['direction_counts'].items():
+                self.direction_counts[direction] = defaultdict(int, counts)
+
+        if 'hourly_counts' in results:
+            self.hourly_counts = defaultdict(lambda: defaultdict(int))
+            for hour, counts in results['hourly_counts'].items():
+                self.hourly_counts[hour] = defaultdict(int, counts)
+
+        # 이벤트 로그 복원
+        if 'recent_events' in results:
+            self.counting_events = results['recent_events']
+
+        logging.info(f"카운팅 결과 가져오기 완료: {filename}")
+        return True
     
     def get_summary_report(self) -> str:
         """요약 리포트 생성"""
@@ -448,39 +466,53 @@ class VehicleCounter:
         """상세 통계 정보 반환"""
         total_vehicles = sum(self.total_counts.values())
         session_duration = time.time() - self.counting_session_start
-        
-        stats = {
+
+        # 여러 분포/카운트 계산이 중복되지 않도록 1회씩 수집하여 재사용
+        total_counts = self.get_total_counts()
+        lane_counts = self.get_lane_counts()
+        direction_counts = self.get_direction_counts()
+        hourly_counts = self.get_hourly_counts()
+
+        vehicles_per_hour = (
+            total_vehicles / (session_duration / 3600)
+            if session_duration > 0 else 0
+        )
+
+        current_time = time.time()
+        recent_events_count = sum(
+            1 for e in self.counting_events
+            if current_time - e['timestamp'] <= 300
+        )
+
+        return {
             'session': {
                 'start_time': self.counting_session_start,
                 'duration_hours': session_duration / 3600,
                 'total_vehicles': total_vehicles,
-                'vehicles_per_hour': total_vehicles / (session_duration / 3600) if session_duration > 0 else 0
+                'vehicles_per_hour': vehicles_per_hour,
             },
             'counts': {
-                'total': self.get_total_counts(),
-                'by_lane': self.get_lane_counts(),
-                'by_direction': self.get_direction_counts(),
-                'by_hour': self.get_hourly_counts()
+                'total': total_counts,
+                'by_lane': lane_counts,
+                'by_direction': direction_counts,
+                'by_hour': hourly_counts,
             },
             'distributions': {
                 'vehicle_types': self.get_vehicle_type_distribution(),
-                'lanes': self.get_lane_distribution()
+                'lanes': self.get_lane_distribution(),
             },
             'rates': {
                 'current_5min': self.get_counting_rate(300),
-                'current_1min': self.get_counting_rate(60)
+                'current_1min': self.get_counting_rate(60),
             },
             'peak_analysis': {
-                'peak_hours': self.get_peak_hours()
+                'peak_hours': self.get_peak_hours(),
             },
             'events': {
                 'total_events': len(self.counting_events),
-                'recent_events_count': len([e for e in self.counting_events 
-                                           if time.time() - e['timestamp'] <= 300])
-            }
+                'recent_events_count': recent_events_count,
+            },
         }
-        
-        return stats
 
 
 if __name__ == "__main__":

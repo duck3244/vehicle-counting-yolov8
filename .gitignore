@@ -150,6 +150,49 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-yolov8n.pt
-vehicle-counting.mp4
-result.mp4
+# ───────────── Model weights ─────────────
+*.pt
+*.pth
+*.onnx
+*.weights
+*.engine
+*.tflite
+
+# ───────────── Large sample / output media ─────────────
+# 모든 비디오 포맷은 기본적으로 추적 안 함 (데모용 샘플은 필요 시 `git add -f` 로 강제 추가).
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.wmv
+*.flv
+screenshot_*.jpg
+webcam_screenshot_*.jpg
+
+# ───────────── CLI 런타임 산출물 (레포 루트에 생성되는 케이스) ─────────────
+counting_results*.json
+counting_results*.png
+*_chart.png
+*_hourly.png
+*_heatmap.png
+*_config_backup.yaml
+vehicle_counting.log
+examples.log
+
+# ───────────── 백엔드 런타임 디렉터리 (대용량) ─────────────
+backend/uploads/
+backend/outputs/
+
+# ───────────── 프론트엔드 ─────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.vite-cache/
+frontend/.DS_Store
+frontend/*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+# TypeScript 증분 빌드 캐시
+*.tsbuildinfo

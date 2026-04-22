@@ -1,609 +1,433 @@
 # 🚗 YOLOv8 차선별 차량 카운팅 시스템
 
-![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-Latest-green.svg)
-![OpenCV](https://img.shields.io/badge/OpenCV-4.5+-red.svg)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
+![YOLOv8](https://img.shields.io/badge/YOLOv8-8.4%2B-green.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-teal.svg)
+![Vue](https://img.shields.io/badge/Vue-3.5-42b883.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**YOLOv8을 사용한 고성능 실시간 차선별 차량 감지, 추적 및 카운팅 시스템**
+**YOLOv8 기반 차량 감지·추적·차선별 카운팅 파이프라인과, 그 위의 FastAPI 백엔드 + Vue 3 프론트엔드.**
 
-![Demo](https://via.placeholder.com/800x400/0066cc/ffffff?text=YOLOv8+Vehicle+Counting+Demo)
+<p align="center">
+  <img src="./demo.png" alt="웹 UI 잡 상세 페이지 — 처리된 영상에 차선 및 카운팅 라인이 오버레이된 모습" width="720" />
+  <br />
+  <sub>웹 UI의 잡 상세 화면(<code>/jobs/:id</code>) — 업로드된 비디오가 처리된 뒤 결과 영상·메타데이터가 함께 표시된다.</sub>
+</p>
+
+---
 
 ## 📋 목차
 
-- [✨ 주요 기능](#-주요-기능)
-- [🚀 빠른 시작](#-빠른-시작)
-- [📁 프로젝트 구조](#-프로젝트-구조)
-- [⚙️ 설치 방법](#️-설치-방법)
-- [💻 사용법](#-사용법)
-- [🎯 사용 예제](#-사용-예제)
-- [⚡ 성능 최적화](#-성능-최적화)
-- [🔧 커스터마이징](#-커스터마이징)
-- [📊 출력 결과](#-출력-결과)
-- [🔧 문제 해결](#-문제-해결)
+- [주요 기능](#-주요-기능)
+- [아키텍처 개요](#-아키텍처-개요)
+- [프로젝트 구조](#-프로젝트-구조)
+- [빠른 시작](#-빠른-시작)
+- [CLI 사용법](#-cli-사용법)
+- [웹 UI 사용법](#-웹-ui-사용법)
+- [API 레퍼런스](#-api-레퍼런스)
+- [설정 (`config.yaml`)](#-설정-configyaml)
+- [출력 결과](#-출력-결과)
+- [문제 해결](#-문제-해결)
+- [문서](#-문서)
+
+---
 
 ## ✨ 주요 기능
 
-### 🎯 **정확한 차량 감지 및 추적**
-- **YOLOv8 최신 모델** 지원 (nano, small, medium, large, xlarge)
-- **실시간 차량 추적** with 고유 ID 시스템
-- **다양한 차량 타입** 분류 (승용차, 트럭, 버스, 오토바이)
-- **고정밀 바운딩 박스** 및 신뢰도 기반 필터링
+- **YOLOv8 차량 감지**: nano ~ xlarge 모델 지원, COCO 차량 4 클래스(car/truck/bus/motorcycle) 필터
+- **ID 기반 추적**: `YOLO.track(persist=True)` + 자체 `VehicleTracker` 로 경로·속도·생존 관리
+- **차선 관리**: auto(균등 분할) / custom(좌표 기반) 모드, 자동 검증 + 카운팅 라인 자동 배치
+- **중복 방지 카운팅**: `(track_id, lane_idx, direction)` 키 기반, `min_track_length`/신뢰도 게이트
+- **풍부한 시각화**: OpenCV 대시보드 + matplotlib 파이/막대/시간대 차트
+- **두 가지 진입점**
+  - CLI (`backend/main_system.py`) — 비디오 파일/웹캠 처리
+  - Web (FastAPI + Vue 3) — 브라우저에서 업로드 → 진행률 폴링 → 결과 재생
+- **GPU 자동 감지** (CUDA 가용 시 torch 로 디바이스 선택)
 
-### 🛣️ **유연한 차선 관리**
-- **자동 차선 설정** (균등 분할)
-- **사용자 정의 차선** (좌표 기반 정밀 설정)
-- **차선 검증** 시스템 (설정 오류 자동 감지)
-- **다중 차선 지원** (2~10개 차선)
+---
 
-### 📊 **스마트 카운팅 시스템**
-- **중복 방지** 카운팅 (동일 차량 재카운팅 방지)
-- **방향별 카운팅** (상행/하행/양방향 선택)
-- **실시간 통계** (시간별, 차선별, 타입별)
-- **이벤트 로깅** (모든 카운팅 기록 저장)
+## 🏗 아키텍처 개요
 
-### 🎨 **풍부한 시각화**
-- **실시간 대시보드** (모든 정보 통합 표시)
-- **추적 경로 시각화** (차량 이동 궤적)
-- **다양한 차트** (원형, 막대, 히트맵)
-- **전문 리포트** (HTML, JSON, CSV)
-
-### ⚡ **고성능 처리**
-- **GPU 가속** 지원 (CUDA 자동 감지)
-- **멀티스레딩** 최적화
-- **메모리 효율성** (대용량 비디오 처리)
-- **실시간 스트리밍** (웹캠, IP 카메라)
-
-## 🚀 빠른 시작
-
-### ⚡ 즉시 실행
-```bash
-# 비디오 파일 처리
-python main_system.py --input your_video.mp4 --output result.mp4
-
-# 웹캠 실시간 처리
-python main_system.py --webcam
-
-# 대화형 예제 실행
-python run_examples.py
 ```
+┌────────────────────┐   HTTP    ┌──────────────────────────────┐
+│  Vue 3 SPA         │ ────────▶ │  FastAPI (uvicorn :8000)     │
+│  (Vite :5173)      │           │   ├─ /api/jobs  (업로드/조회) │
+│  ─ Pinia / Router  │           │   ├─ /api/health             │
+│  ─ axios           │           │   └─ /static/{job_id}/...    │
+└────────────────────┘           │                              │
+                                 │  ThreadPoolExecutor(1)       │
+                                 │   └─ VehicleCountingSystem   │
+                                 │        ├─ VehicleDetector    │
+                                 │        ├─ VehicleTracker     │
+                                 │        ├─ LaneManager        │
+                                 │        ├─ VehicleCounter     │
+                                 │        └─ VehicleVisualizer  │
+                                 │  uploads/   outputs/{id}/    │
+                                 └──────────────────────────────┘
+```
+
+자세한 내용은 [`docs/architecture.md`](./docs/architecture.md) 와 [`docs/uml.md`](./docs/uml.md) 참고.
+
+---
 
 ## 📁 프로젝트 구조
 
 ```
 vehicle-counting-yolov8/
-├── 📋 README.md                    # 프로젝트 설명서
-├── ⚙️ requirements.txt            # 패키지 의존성
-├── 🔧 config.yaml                 # 설정 파일
-│
-├── 🧠 핵심 모듈/
-│   ├── detector.py               # YOLOv8 차량 감지
-│   ├── tracker.py                # 차량 추적 및 속도 계산
-│   ├── lane_manager.py           # 차선 관리 및 검증
-│   ├── counter.py                # 카운팅 로직 및 통계
-│   └── visualizer.py             # 시각화 및 차트 생성
-│
-├── 🎯 메인 시스템/
-│   ├── main_system.py            # 통합 시스템
-│   └── run_examples.py           # 7가지 실행 예제
-│
-└── 📊 출력 파일/
-    ├── counting_results.json     # 카운팅 결과 (JSON)
-    ├── counting_chart.png        # 통계 차트
-    └── report.html               # HTML 리포트
+├── backend/
+│   ├── detector.py          # YOLOv8 차량 감지
+│   ├── tracker.py           # 트랙 히스토리/속도/정리
+│   ├── lane_manager.py      # 차선 + 카운팅 라인 관리
+│   ├── counter.py           # 중복 방지 카운팅 + 통계
+│   ├── visualizer.py        # OpenCV 오버레이 + matplotlib 차트
+│   ├── main_system.py       # VehicleCountingSystem (오케스트레이터 + CLI)
+│   ├── run_examples.py      # 7가지 시나리오 예제
+│   ├── config.yaml          # 파이프라인 기본 설정
+│   ├── requirements.txt
+│   ├── uploads/             # (런타임) API 업로드
+│   ├── outputs/{job_id}/    # (런타임) 잡별 산출물
+│   └── api/                 # FastAPI 어댑터
+│       ├── main.py
+│       ├── jobs.py          # In-memory JobRegistry
+│       ├── pipeline.py      # VehicleCountingSystem 어댑터 + ffmpeg
+│       ├── schemas.py       # Pydantic 모델
+│       └── routes/{jobs,config}.py
+├── frontend/                # Vue 3 + Vite + Pinia + Vue Router + axios
+│   ├── src/{api,stores,views,router,types}/
+│   └── vite.config.ts       # /api, /static → 127.0.0.1:8000 프록시
+├── docs/
+│   ├── architecture.md      # 전체 아키텍처 문서
+│   └── uml.md               # 컴포넌트/클래스/시퀀스/상태 다이어그램
+├── demo.png
+├── LICENSE
+└── README.md
 ```
 
-## ⚙️ 설치 방법
+---
 
-### 📋 시스템 요구사항
-- **Python**: 3.7 이상
-- **RAM**: 최소 8GB (권장 16GB)
-- **GPU**: CUDA 지원 GPU (선택사항, 성능 향상)
-- **디스크**: 최소 5GB 여유 공간
+## 🚀 빠른 시작
 
-### 🔧 수동 설치 (고급 사용자)
+### 요구사항
 
-#### 1. Python 환경 설정
+- Python 3.10+ (검증: py310)
+- Node.js 18+ (프론트엔드용)
+- (선택) NVIDIA GPU + CUDA — 없으면 CPU 로 동작
+- (선택) `ffmpeg` — 결과 영상의 브라우저 호환(H.264) 재인코딩에 사용
+
+### 1) 저장소 클론
+
 ```bash
-# 가상환경 생성 (권장)
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate   # Windows
-
-# 패키지 업그레이드
-pip install --upgrade pip setuptools wheel
+git clone <this-repo>
+cd vehicle-counting-yolov8
 ```
 
-#### 2. 의존성 설치
+### 2) 백엔드 설치
+
 ```bash
-# 모든 패키지 설치
+cd backend
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+pip install --upgrade pip
 pip install -r requirements.txt
-
-# 또는 개별 설치
-pip install ultralytics opencv-python numpy pillow pyyaml
-pip install matplotlib seaborn pandas scipy
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-#### 3. YOLO 모델 다운로드
-```bash
-# 모델 디렉토리 생성
-mkdir models
+> GPU 를 쓰려면 `torch` 를 CUDA 빌드로 재설치하세요 (예: `pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu121`).
 
-# 모델 다운로드 (선택)
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -O models/yolov8n.pt
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt -O models/yolov8s.pt
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt -O models/yolov8m.pt
+### 3) 프론트엔드 설치
+
+```bash
+cd ../frontend
+npm install
 ```
 
-#### 4. 디렉토리 구조 생성
+### 4) 실행
+
+두 개의 터미널에서:
+
 ```bash
-mkdir -p {input_videos,output_videos,results,detected_vehicles,debug_frames}
+# 터미널 A — 백엔드 (backend/ 에서)
+uvicorn api.main:app --reload --port 8000
+
+# 터미널 B — 프론트엔드 (frontend/ 에서)
+npm run dev
 ```
 
-## 💻 사용법
+브라우저로 http://localhost:5173 접속 → 비디오 업로드 → 진행률 확인 → 결과 영상 재생.
 
-### 🎮 기본 명령어
+---
+
+## 💻 CLI 사용법
+
+파이프라인만 쓰고 싶다면 `backend/main_system.py` 를 직접 실행한다.
 
 ```bash
-# 기본 비디오 처리
-python main_system.py --input video.mp4
+cd backend
 
-# 출력 파일 지정
-python main_system.py --input video.mp4 --output result.mp4
+# 비디오 파일 처리
+python main_system.py --input your_video.mp4 --output result.mp4
 
-# 특정 모델 사용
-python main_system.py --input video.mp4 --model yolov8m.pt
-
-# 신뢰도 임계값 설정
-python main_system.py --input video.mp4 --conf 0.7
-
-# 차선 수 지정
-python main_system.py --input video.mp4 --lanes 4
-
-# 웹캠 사용
+# 웹캠 실시간
 python main_system.py --webcam
 
-# 화면 표시 없이 처리
-python main_system.py --input video.mp4 --no-display
+# 모델/신뢰도/차선 수 오버라이드
+python main_system.py --input video.mp4 --model yolov8m.pt --conf 0.6 --lanes 4
 
-# 결과 저장
-python main_system.py --input video.mp4 --save-results
+# 화면 표시 없이 + 결과 저장
+python main_system.py --input video.mp4 --no-display --save-results
 
-# 설정 파일 사용
-python main_system.py --config custom_config.yaml
+# 커스텀 설정 파일
+python main_system.py --config custom_config.yaml --input video.mp4
 ```
 
-### ⚙️ 설정 파일 사용
-
-`config.yaml` 파일을 편집하여 상세 설정:
-
-```yaml
-# 모델 설정
-model:
-  path: "yolov8n.pt"
-  confidence_threshold: 0.5
-  device: "auto"  # auto, cpu, cuda
-
-# 차선 설정
-lanes:
-  mode: "auto"  # auto, custom
-  count: 3
-  custom_lanes:
-    - [0, 240]
-    - [240, 480] 
-    - [480, 720]
-
-# 카운팅 설정
-counting:
-  directions: ["both"]  # up, down, both
-  min_track_length: 5
-  confidence_threshold: 0.5
-
-# 비디오 설정
-video:
-  display_realtime: true
-  save_output: true
-  frame_skip: 1
-
-# 출력 설정
-output:
-  save_results: true
-  save_format: "json"
-  save_cropped_vehicles: false
-```
-
-### 🐍 Python 스크립트에서 사용
+### Python 스크립트에서 사용
 
 ```python
 from main_system import VehicleCountingSystem
 
-# 시스템 초기화
 system = VehicleCountingSystem("config.yaml")
-
-# 설정 커스터마이징
-custom_config = {
-    'model': {'path': 'yolov8s.pt', 'confidence_threshold': 0.6},
-    'lanes': {'mode': 'auto', 'count': 4},
-    'counting': {'directions': ['both']}
-}
-system.update_config(custom_config)
-
-# 비디오 처리
-success = system.process_video("input.mp4", "output.mp4")
-
-# 웹캠 처리
-# success = system.process_webcam()
-
-# 시스템 상태 확인
-status = system.get_system_status()
-print(f"처리된 프레임: {status['frame_count']}")
-print(f"총 차량 수: {status['total_vehicles']}")
+system.update_config({
+    "model":    {"path": "yolov8s.pt", "confidence_threshold": 0.6},
+    "lanes":    {"mode": "auto", "count": 4},
+    "counting": {"directions": ["both"]},
+})
+system.process_video("input.mp4", "output.mp4")
+print(system.get_system_status())
 ```
 
-## 🎯 사용 예제
-
-### 📝 대화형 예제 실행
+### 대화형 예제
 
 ```bash
 python run_examples.py
 ```
 
-**7가지 예제 시나리오:**
+7가지 시나리오(기본/고정밀/커스텀 차선/웹캠/배치/벤치마크/시나리오별 설정) 제공.
 
-1. **기본 비디오 처리** - 표준 3차선 도로 분석
-2. **고정밀도 처리** - 큰 모델로 정확도 극대화  
-3. **사용자 정의 차선** - 복잡한 차선 구조 설정
-4. **웹캠 실시간 처리** - 라이브 스트리밍 분석
-5. **일괄 처리** - 여러 비디오 자동 처리
-6. **성능 비교** - 다양한 모델 벤치마크
-7. **다양한 설정 시연** - 상황별 최적 설정
+---
 
-### 🎬 실제 사용 사례
+## 🌐 웹 UI 사용법
 
-#### 고속도로 교통량 분석
+1. 백엔드(`uvicorn api.main:app`) 와 프론트(`npm run dev`) 를 각각 띄운다.
+2. http://localhost:5173 접속 → **백엔드 상태** 패널에서 `ok` + GPU 이름 확인.
+3. **새 잡 만들기** 에서 비디오 파일(`.mp4 .avi .mov .mkv .webm`) 선택, 차선 수/신뢰도 입력(선택) 후 **잡 시작**.
+4. 자동으로 `/jobs/:id` 상세로 이동 → 프로그레스 바가 live 로 갱신.
+5. 완료 시 결과 영상, 카운트 요약 표, 차트 이미지가 그대로 렌더됨.
+
+폴링 전략:
+
+- 홈 화면: 실행 중/대기 중 잡이 하나라도 있으면 3초 간격으로 목록 새로고침
+- 상세 화면: `running` 1초, `queued` 2초 간격. `done`/`error` 시 정지
+
+---
+
+## 🔌 API 레퍼런스
+
+베이스 URL: `http://localhost:8000`
+
+| 메소드 | 경로 | 설명 |
+|---|---|---|
+| `GET`  | `/api/health` | 서버 상태 + GPU 이름 + 버전 |
+| `POST` | `/api/jobs` | 비디오 업로드 + 잡 생성 |
+| `GET`  | `/api/jobs` | 잡 목록 (최신순) |
+| `GET`  | `/api/jobs/{id}` | 단일 잡 상세 (진행률/결과/오류 포함) |
+| `GET`  | `/api/config` | `backend/config.yaml` 현재 값 (읽기 전용) |
+| `GET`  | `/static/{id}/result.mp4` 등 | 잡별 산출물 정적 서빙 |
+
+### 잡 생성 예
+
 ```bash
-python main_system.py \
-  --input highway_traffic.mp4 \
-  --output highway_analysis.mp4 \
-  --model yolov8m.pt \
-  --lanes 5 \
-  --conf 0.7 \
-  --save-results
+curl -X POST http://localhost:8000/api/jobs \
+  -F "file=@/path/to/video.mp4" \
+  -F "lanes=3" \
+  -F "confidence_threshold=0.6"
 ```
 
-#### 도심 교차로 모니터링
-```bash
-python main_system.py \
-  --input intersection.mp4 \
-  --output intersection_result.mp4 \
-  --model yolov8s.pt \
-  --lanes 3 \
-  --conf 0.6
+응답:
+
+```json
+{
+  "id": "a1b2c3d4e5f6",
+  "status": "queued",
+  "filename": "video.mp4",
+  "created_at": "2026-04-22T06:45:00Z",
+  "progress": 0.0,
+  "options": { "lanes": 3, "confidence_threshold": 0.6, "model_path": null }
+}
 ```
 
-#### 주차장 입구 카운팅
+### 상태 폴링
+
+```bash
+curl http://localhost:8000/api/jobs/a1b2c3d4e5f6
+```
+
+`status` 가 `done` 이면 `result.artifacts` 의 URL 을 그대로 `<video>` / `<img>` 에 붙이면 된다.
+
+> ⚠️ MVP 특성상 **잡 레지스트리는 in-memory** 이며 프로세스 재시작 시 소실됩니다. 단일 GPU 가정으로 워커는 1개입니다.
+
+---
+
+## ⚙️ 설정 (`config.yaml`)
+
+`backend/config.yaml` 전체 스키마:
+
 ```yaml
-# parking_config.yaml
+model:
+  path: "yolov8n.pt"            # nano / small / medium / large / xlarge
+  confidence_threshold: 0.5     # 0.0 ~ 1.0
+  device: "auto"                # auto | cpu | cuda | cuda:0
+
 lanes:
-  mode: "custom"
-  custom_lanes: [[200, 400]]  # 단일 차선
+  mode: "auto"                  # auto | custom
+  count: 3                      # auto 모드 차선 수
+  margin_top: 50
+  margin_bottom: 50
+  # custom 모드 예:
+  # custom_lanes:
+  #   - [0, 240]
+  #   - [240, 480]
+  #   - [480, 720]
+
+tracking:
+  max_history_length: 50
+  max_disappeared: 30
+  cleanup_interval_frames: 300
+  cleanup_max_age_seconds: 300
 
 counting:
-  directions: ["up"]  # 입장 차량만 카운팅
-  min_track_length: 3
-```
-
-```bash
-python main_system.py --config parking_config.yaml --input parking_entrance.mp4
-```
-
-## ⚡ 성능 최적화
-
-### 🚀 **속도 최적화**
-
-```yaml
-# 고속 처리 설정
-model:
-  path: "yolov8n.pt"  # 가장 빠른 모델
-  confidence_threshold: 0.4
+  directions: ["both"]          # [up] | [down] | [both]
+  min_track_length: 5
+  confidence_threshold: 0.5
 
 video:
-  frame_skip: 2  # 매 2프레임마다 처리
+  input_path: null
+  output_path: null
+  display_realtime: true        # cv2.imshow
+  save_output: false
+  frame_skip: 1                 # N=매 N번째 프레임만 처리
 
-tracking:
-  max_history_length: 20  # 짧은 히스토리
-  max_disappeared: 15
+visualization:
+  enabled: true
+  show_bbox: true
+  show_track_history: true
+  show_lanes: true
+  show_statistics: true
+
+output:
+  save_results: true
+  results_format: "json"
+  results_file: "counting_results"
+
+debug:
+  log_level: "INFO"             # DEBUG | INFO | WARNING | ERROR
 ```
 
-### 🎯 **정확도 최적화**
+API 경로로 제출된 잡은 `JobOptions` (`lanes`, `confidence_threshold`, `model_path`) 로 위 스키마를 부분적으로 덮어쓴다.
 
-```yaml
-# 고정밀도 설정
-model:
-  path: "yolov8x.pt"  # 가장 정확한 모델
-  confidence_threshold: 0.8
-
-counting:
-  min_track_length: 10  # 더 긴 추적 필요
-  confidence_threshold: 0.7
-
-tracking:
-  max_history_length: 100  # 긴 히스토리
-```
-
-### 💾 **메모리 최적화**
-
-```yaml
-performance:
-  memory_limit: "4GB"
-  cleanup_interval: 300  # 5분마다 정리
-  
-tracking:
-  max_disappeared: 30  # 사라진 트랙 빨리 제거
-```
-
-### 🔥 **GPU 활용**
-
-```bash
-# CUDA 환경 확인
-python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-
-# GPU 메모리 확인
-nvidia-smi
-
-# 특정 GPU 사용
-export CUDA_VISIBLE_DEVICES=0
-python main_system.py --input video.mp4
-```
-
-## 🔧 커스터마이징
-
-### 🎨 새로운 차량 타입 추가
-
-```python
-# detector.py 수정
-class VehicleDetector:
-    def __init__(self, ...):
-        self.vehicle_classes = {
-            2: 'car',
-            3: 'motorcycle', 
-            5: 'bus',
-            7: 'truck',
-            # 새로운 클래스 추가
-            1: 'bicycle',
-            4: 'airplane',
-            6: 'train'
-        }
-```
-
-### 🎭 시각화 커스터마이징
-
-```python
-# visualizer.py 설정 수정
-custom_config = {
-    'colors': {
-        'car': (0, 255, 0),          # 초록색
-        'truck': (255, 0, 0),        # 빨간색  
-        'bus': (0, 0, 255),          # 파란색
-        'motorcycle': (255, 255, 0), # 노란색
-        'bicycle': (255, 0, 255),    # 마젠타 (새로운 색상)
-    },
-    'line_thickness': {
-        'bbox': 3,                   # 더 두꺼운 박스
-        'track_history': 4           # 더 굵은 추적선
-    }
-}
-
-visualizer = VehicleVisualizer(custom_config)
-```
-
-### 🔄 카운팅 로직 확장
-
-```python
-# counter.py 확장
-class CustomVehicleCounter(VehicleCounter):
-    def __init__(self):
-        super().__init__()
-        self.rush_hour_counts = defaultdict(int)
-    
-    def process_rush_hour_counting(self, vehicle, current_hour):
-        if 7 <= current_hour <= 9 or 17 <= current_hour <= 19:
-            self.rush_hour_counts[vehicle['class_name']] += 1
-    
-    def get_rush_hour_stats(self):
-        return dict(self.rush_hour_counts)
-```
-
-### 🌐 새로운 입력 소스 추가
-
-```python
-# main_system.py 확장
-def process_rtsp_stream(self, rtsp_url: str):
-    """RTSP 스트림 처리"""
-    cap = cv2.VideoCapture(rtsp_url)
-    # 스트림 처리 로직...
-
-def process_image_sequence(self, image_dir: str):
-    """이미지 시퀀스 처리"""
-    images = sorted(glob.glob(os.path.join(image_dir, "*.jpg")))
-    # 이미지 시퀀스 처리 로직...
-```
+---
 
 ## 📊 출력 결과
 
-### 📄 JSON 결과 예시
+### 디렉터리 레이아웃
+
+CLI 실행 시 현재 디렉터리에, API 실행 시 `backend/outputs/{job_id}/` 에 저장:
+
+- `result.mp4` — 결과 영상 (H.264 재인코딩 성공 시 브라우저 호환)
+- `results.json` — 카운팅 통계 전체 dump
+- `results_chart.png` — 차량 타입 원형 + 차선 막대 차트
+- `results_hourly.png` — 시간대별 스택 바 차트
+
+### `results.json` 스키마 (발췌)
 
 ```json
 {
   "session_info": {
     "start_time": 1703123456.789,
-    "duration_seconds": 3600.0,
+    "duration_seconds": 120.5,
     "count_directions": ["both"]
   },
-  "total_counts": {
-    "car": 1247,
-    "truck": 89,
-    "bus": 23,
-    "motorcycle": 156
-  },
+  "total_counts": { "car": 124, "truck": 8, "bus": 2, "motorcycle": 9 },
   "lane_counts": {
-    "lane_1": {
-      "car": 445,
-      "truck": 32,
-      "bus": 8,
-      "motorcycle": 67
-    },
-    "lane_2": {
-      "car": 398,
-      "truck": 29,
-      "bus": 7,
-      "motorcycle": 45
-    },
-    "lane_3": {
-      "car": 404,
-      "truck": 28,
-      "bus": 8,
-      "motorcycle": 44
-    }
+    "0": { "car": 45, "truck": 3 },
+    "1": { "car": 42, "truck": 3 },
+    "2": { "car": 37, "truck": 2 }
   },
+  "direction_counts": { "up": { "car": 50 }, "down": { "car": 74 } },
+  "hourly_counts": { "14": { "car": 124 } },
   "statistics": {
-    "peak_hours": [
-      ["08", 245],
-      ["17", 289],
-      ["18", 267]
-    ],
-    "lane_distribution": {
-      "lane_1": 36.4,
-      "lane_2": 31.6,
-      "lane_3": 32.0
-    },
-    "vehicle_type_distribution": {
-      "car": 82.4,
-      "motorcycle": 10.3,
-      "truck": 5.9,
-      "bus": 1.5
-    },
-    "vehicles_per_hour": 421.8
-  }
+    "peak_hours": [["14", 143]],
+    "lane_distribution": { "0": 36.0, "1": 33.6, "2": 30.4 },
+    "vehicle_type_distribution": { "car": 86.7, "motorcycle": 6.3, "truck": 5.6, "bus": 1.4 },
+    "counting_rate": { "car": 62.0 }
+  },
+  "recent_events": [ /* 최근 100건 */ ]
 }
 ```
 
-### 📈 생성되는 차트들
-
-1. **원형 차트** (`counting_chart.png`)
-   - 차량 타입별 분포 비율
-   - 색상별 차량 구분
-   
-2. **막대 차트** (`lane_distribution.png`)  
-   - 차선별 교통량 비교
-   - 시간대별 분석
-
-3. **시간별 차트** (`hourly_chart.png`)
-   - 24시간 교통 패턴
-   - 피크 시간대 식별
-
-4. **히트맵** (`traffic_heatmap.png`)
-   - 차선-시간 교차 분석
-   - 핫스팟 지역 식별
-
-### 🌐 HTML 리포트
-
-자동 생성되는 전문적인 HTML 리포트에는 다음이 포함됩니다:
-
-- 📊 **종합 통계 대시보드**
-- 🎯 **차량 타입별 상세 분석** 
-- 🛣️ **차선별 교통 패턴**
-- ⏰ **시간대별 트렌드 분석**
-- 📈 **모든 차트 통합 표시**
-- 📋 **설정 및 메타데이터**
+---
 
 ## 🔧 문제 해결
 
-### ❗ 일반적인 문제들
+### 결과 영상이 브라우저에서 재생되지 않아요
 
-#### 1. **YOLOv8 모델 다운로드 실패**
+- OpenCV 빌드에 H.264(`avc1`) 코덱이 없으면 `mp4v` 로 떨어지며, 일부 브라우저가 이를 재생하지 못합니다.
+- 시스템에 `ffmpeg` 를 설치하면 `libx264 + faststart` 로 자동 재인코딩됩니다:
+  ```bash
+  sudo apt install ffmpeg    # Ubuntu/Debian
+  brew install ffmpeg        # macOS
+  ```
+
+### CUDA 관련 오류
 
 ```bash
-# 해결 방법 1: 수동 다운로드
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
-mv yolov8n.pt models/
+# 강제 CPU 모드
+python main_system.py --input video.mp4   # config.yaml 에서 device: "cpu"
+```
 
-# 해결 방법 2: Python으로 다운로드
+`torch` 가 CPU 빌드라면 `model.to('cuda')` 에서 실패합니다. CUDA 빌드로 재설치:
+
+```bash
+pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121
+```
+
+### 메모리 부족
+
+```yaml
+# config.yaml
+model:
+  path: "yolov8n.pt"          # 더 작은 모델
+video:
+  frame_skip: 2               # 프레임 건너뛰기
+tracking:
+  max_history_length: 20
+  max_disappeared: 15
+```
+
+### YOLO 모델 자동 다운로드 실패
+
+```bash
+# 수동 다운로드
+wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+# 또는 파이썬으로
 python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 ```
 
-#### 2. **CUDA/GPU 관련 오류**
+### CORS 오류 (프론트 ↔ 백엔드)
 
-```bash
-# CPU 모드로 강제 실행
-export CUDA_VISIBLE_DEVICES=""
-python main_system.py --input video.mp4
+`backend/api/main.py` 의 `allow_origins` 는 기본값이 `http://localhost:5173`, `http://127.0.0.1:5173` 입니다. 다른 오리진에서 호출하려면 여기에 추가하세요.
 
-# 또는 config.yaml에서 설정
-model:
-  device: "cpu"
-```
+### Vite 프록시가 `/api` 를 못 찾아요
 
-#### 3. **메모리 부족 오류**
-
-```bash
-# 더 작은 모델 사용
-python main_system.py --input video.mp4 --model yolov8n.pt
-
-# 프레임 건너뛰기로 메모리 절약
-# config.yaml에서:
-video:
-  frame_skip: 3  # 매 3프레임마다 처리
-```
-
-#### 4. **OpenCV 관련 오류**
-
-```bash
-# OpenCV 재설치
-pip uninstall opencv-python opencv-python-headless
-pip install opencv-python
-
-# 헤드리스 버전 (서버 환경)
-pip install opencv-python-headless
-```
-
-#### 5. **느린 처리 속도**
-
-```yaml
-# 성능 최적화 설정
-model:
-  path: "yolov8n.pt"  # 가장 빠른 모델
-  confidence_threshold: 0.6  # 높은 임계값으로 연산 줄이기
-
-video:
-  frame_skip: 2  # 프레임 건너뛰기
-
-tracking:
-  max_history_length: 20  # 짧은 히스토리
-```
-
-### 🔍 디버깅 모드
-
-```bash
-# 상세 로그와 함께 실행
-python main_system.py --input video.mp4 --config debug_config.yaml
-
-# debug_config.yaml:
-debug:
-  log_level: "DEBUG"
-  save_debug_frames: true
-  verbose: true
-```
-
-### 📞 도움말 확인
-
-```bash
-# 사용 가능한 모든 옵션 보기
-python main_system.py --help
-
-# 예제 도움말
-python run_examples.py --help
-``` 
+백엔드가 `:8000` 에서 떠 있는지, `frontend/vite.config.ts` 의 `target` 과 일치하는지 확인합니다.
 
 ---
+
+## 📚 문서
+
+- [`docs/architecture.md`](./docs/architecture.md) — 전체 아키텍처, 데이터 흐름, 배포 토폴로지, 확장 지점
+- [`docs/uml.md`](./docs/uml.md) — 컴포넌트·클래스·시퀀스·상태 다이어그램 (Mermaid)
+
+---
+
+## 📝 라이선스
+
+[MIT](./LICENSE)

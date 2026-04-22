@@ -379,13 +379,15 @@ class VehicleVisualizer:
             ax2.set_ylabel('Vehicle Count')
         
         plt.tight_layout()
-        
+
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
             logging.info(f"차트 저장 완료: {save_path}")
-        
+            plt.close(fig)
+            return None
+
         return fig
-    
+
     def create_hourly_chart(self, counter, save_path: str = None) -> Optional[plt.Figure]:
         """시간별 카운팅 차트 생성"""
         hourly_counts = counter.get_hourly_counts()
@@ -425,13 +427,15 @@ class VehicleVisualizer:
         
         plt.xticks(rotation=45)
         plt.tight_layout()
-        
+
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
             logging.info(f"시간별 차트 저장 완료: {save_path}")
-        
+            plt.close(fig)
+            return None
+
         return fig
-    
+
     def create_heatmap(self, counter, save_path: str = None) -> Optional[plt.Figure]:
         """차선-시간 히트맵 생성"""
         lane_counts = counter.get_lane_counts()
@@ -460,11 +464,13 @@ class VehicleVisualizer:
         ax.set_ylabel('Lane')
         
         plt.tight_layout()
-        
+
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
             logging.info(f"히트맵 저장 완료: {save_path}")
-        
+            plt.close(fig)
+            return None
+
         return fig
     
     def _get_matplotlib_color(self, vehicle_type: str) -> str:

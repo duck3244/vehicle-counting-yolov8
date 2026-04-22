@@ -6,8 +6,10 @@ YOLOv8을 사용한 차량 감지 기능
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 import logging
+import re
 
 
 class VehicleDetector:
@@ -48,17 +50,38 @@ class VehicleDetector:
         logging.info(f"VehicleDetector 초기화 완료: {model_path}")
     
     def _load_model(self) -> YOLO:
-        """YOLO 모델 로드"""
+        """YOLO 모델 로드
+
+        로컬 경로에 파일이 있으면 그대로 사용하고, 없다면 ultralytics 의 표준
+        숏네임(예: ``yolov8n.pt``)인 경우에만 자동 다운로드를 허용한다.
+        임의의 경로/파일명이 누락된 경우에는 명시적으로 FileNotFoundError 를 던진다.
+        """
+        model_path = Path(self.model_path)
+        is_official_shortname = bool(
+            re.fullmatch(r"yolov[58][nsmlx](?:-\w+)?\.pt", model_path.name)
+        )
+
+        if not model_path.exists():
+            if is_official_shortname:
+                logging.warning(
+                    f"모델 파일이 로컬에 없습니다: {self.model_path} "
+                    "— ultralytics 에서 자동 다운로드를 시도합니다."
+                )
+            else:
+                raise FileNotFoundError(
+                    f"모델 파일을 찾을 수 없습니다: {self.model_path}"
+                )
+
         try:
             model = YOLO(self.model_path)
-            
+
             # 디바이스 설정
             if self.device != "auto":
                 model.to(self.device)
-            
+
             logging.info(f"YOLO 모델 로드 성공: {self.model_path}")
             return model
-            
+
         except Exception as e:
             logging.error(f"모델 로드 실패: {e}")
             raise

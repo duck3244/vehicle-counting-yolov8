@@ -14,22 +14,29 @@ import time
 class VehicleTracker:
     """차량 추적 관리 클래스"""
     
-    def __init__(self, max_history_length: int = 50, max_disappeared: int = 30):
+    def __init__(self, max_history_length: int = 50, max_disappeared: int = 30,
+                 cleanup_interval_frames: int = 300,
+                 cleanup_max_age_seconds: float = 300.0):
         """
         차량 추적기 초기화
-        
+
         Args:
             max_history_length (int): 최대 추적 히스토리 길이
             max_disappeared (int): 최대 사라진 프레임 수
+            cleanup_interval_frames (int): 몇 프레임마다 오래된 트랙을 정리할지
+            cleanup_max_age_seconds (float): 비활성 트랙이 유지될 수 있는 최대 시간(초)
         """
         self.max_history_length = max_history_length
         self.max_disappeared = max_disappeared
-        
+        self.cleanup_interval_frames = max(1, int(cleanup_interval_frames))
+        self.cleanup_max_age_seconds = float(cleanup_max_age_seconds)
+        self._frames_since_cleanup = 0
+
         # 추적 데이터
         self.tracks = {}  # track_id: TrackInfo
         self.track_history = defaultdict(lambda: deque(maxlen=max_history_length))
         self.disappeared_counts = defaultdict(int)
-        
+
         # 통계
         self.stats = {
             'total_tracks': 0,
@@ -37,7 +44,7 @@ class VehicleTracker:
             'lost_tracks': 0,
             'avg_track_length': 0
         }
-        
+
         logging.info("VehicleTracker 초기화 완료")
     
     def update_tracks(self, vehicles: List[Dict]) -> List[Dict]:
@@ -75,10 +82,16 @@ class VehicleTracker:
         
         # 사라진 트랙 처리
         self._handle_disappeared_tracks(current_track_ids)
-        
+
+        # 주기적으로 오래된 트랙 제거 (메모리 누수 방지)
+        self._frames_since_cleanup += 1
+        if self._frames_since_cleanup >= self.cleanup_interval_frames:
+            self.cleanup_old_tracks(self.cleanup_max_age_seconds)
+            self._frames_since_cleanup = 0
+
         # 통계 업데이트
         self._update_stats()
-        
+
         return updated_vehicles
     
     def _create_new_track(self, track_id: int, vehicle: Dict):
@@ -159,15 +172,14 @@ class VehicleTracker:
     def get_track_history(self, track_id: int, max_points: int = None) -> List[Tuple[int, int]]:
         """
         특정 트랙의 히스토리 반환
-        
-        Args:
-            track_id (int): 트랙 ID
-            max_points (int): 최대 포인트 수
-            
-        Returns:
-            List[Tuple]: 좌표 리스트
+
+        ``defaultdict`` 의 기본값 생성으로 인한 키 누수를 피하기 위해
+        ``.get()`` 을 사용한다.
         """
-        history = list(self.track_history[track_id])
+        history_deque = self.track_history.get(track_id)
+        if history_deque is None:
+            return []
+        history = list(history_deque)
         if max_points and len(history) > max_points:
             return history[-max_points:]
         return history
@@ -185,9 +197,9 @@ class VehicleTracker:
         Returns:
             float: 속도 (km/h)
         """
-        history = self.track_history[track_id]
-        
-        if len(history) < 5:  # 최소 5개 포인트 필요
+        history = self.track_history.get(track_id)
+
+        if history is None or len(history) < 5:  # 최소 5개 포인트 필요
             return 0.0
         
         # 최근 몇 프레임의 이동 거리 계산
@@ -264,8 +276,8 @@ class VehicleTracker:
                     track_color = colors[color_idx]
                     
                     # 선 그리기
-                    for i in range(1, len(history)):
-                        cv2.line(result_frame, history[i-1], history[i], track_color, 2)
+                    for p_prev, p_cur in zip(history[:-1], history[1:]):
+                        cv2.line(result_frame, p_prev, p_cur, track_color, 2)
                     
                     # 방향 화살표
                     if len(history) >= 2:
@@ -359,7 +371,7 @@ class VehicleTracker:
             return {}
         
         track_info = self.tracks[track_id].copy()
-        track_info['history'] = list(self.track_history[track_id])
+        track_info['history'] = list(self.track_history.get(track_id, ()))
         track_info['speed_history'] = list(track_info['speed_history'])
         track_info['size_history'] = list(track_info['size_history'])
         

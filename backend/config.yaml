@@ -1,0 +1,51 @@
+# YOLOv8 차선별 차량 카운팅 시스템 - 기본 설정
+# main_system.py 가 읽는 설정 스키마. 모든 키는 선택이며 누락 시 내부 기본값 사용.
+
+model:
+  path: "yolov8n.pt"            # 모델 파일 경로 (nano/small/medium/large/xlarge)
+  confidence_threshold: 0.5     # 0.0 ~ 1.0
+  device: "auto"                # auto | cpu | cuda | cuda:0
+
+lanes:
+  mode: "auto"                  # auto | custom
+  count: 3                      # auto 모드에서 차선 수
+  margin_top: 50                # auto 모드 상단 여백(px)
+  margin_bottom: 50             # auto 모드 하단 여백(px)
+  # custom 모드 예:
+  # custom_lanes:
+  #   - [0, 240]
+  #   - [240, 480]
+  #   - [480, 720]
+
+tracking:
+  max_history_length: 50        # 트랙별 좌표 히스토리 최대 길이
+  max_disappeared: 30           # 사라진 프레임 허용치 (넘으면 비활성화)
+  cleanup_interval_frames: 300  # N 프레임마다 오래된 트랙 정리
+  cleanup_max_age_seconds: 300  # 비활성 상태 유지 허용 시간
+
+counting:
+  directions: ["both"]          # [up], [down], [both]
+  min_track_length: 5           # 카운팅 허용 최소 추적 길이
+  confidence_threshold: 0.5
+
+video:
+  input_path: null              # CLI --input 으로도 지정 가능
+  output_path: null
+  display_realtime: true        # cv2.imshow 창 표시
+  save_output: false
+  frame_skip: 1                 # 1=모든 프레임, N=매 N번째 프레임만 처리
+
+visualization:
+  enabled: true
+  show_bbox: true
+  show_track_history: true
+  show_lanes: true
+  show_statistics: true
+
+output:
+  save_results: true
+  results_format: "json"
+  results_file: "counting_results"   # 확장자 제외, 자동으로 .json / _chart.png 등 부여
+
+debug:
+  log_level: "INFO"             # DEBUG | INFO | WARNING | ERROR
